@@ -87,14 +87,24 @@ end
 -- Party
 -------------------------------------------------------------------------------
 
--- Lower-cased names of everyone currently in the party or raid, where readable.
+-- A character's full name. Forever names have two parts, such as "Betty Dies": the game returns
+-- the first part where the name usually is and the second part where a realm would usually be.
+-- Returns nil when the name cannot be read (it can be hidden inside instances).
+local function FullName(unit)
+	local first, second = UnitName(unit)
+	if not first or IsSecret(first) or first == "" then return nil end
+	if second and not IsSecret(second) and second ~= "" then return first .. " " .. second end
+	return first
+end
+
+-- Lower-cased full names of everyone currently in the party or raid, where readable.
 local function PartyNames()
 	local present = {}
 	local function add(unit)
 		local exists = UnitExists(unit)
 		if IsSecret(exists) or not exists then return end
-		local name = UnitName(unit)
-		if name and not IsSecret(name) then present[name:lower()] = true end
+		local name = FullName(unit)
+		if name then present[name:lower()] = true end
 	end
 	for i = 1, 4 do add("party" .. i) end
 	for i = 1, 40 do add("raid" .. i) end
@@ -175,6 +185,16 @@ local function LoadCode(text, fromPaste)
 		Refresh(reason)
 		return false
 	end
+	-- Temporary: the companion's "it works" test code. It proves the paste and decode path
+	-- without inviting anyone.
+	if parsed.group == "selftest" then
+		current = nil
+		quickPaste = false
+		Print("test code received. The addon is working.")
+		Refresh()
+		if frame then frame.headline:SetText("|cff3fd06aTest code received. The addon is working.|r") end
+		return true
+	end
 	if #parsed.names == 0 then
 		current = nil
 		Refresh("That code has nobody left to invite.")
@@ -208,43 +228,59 @@ local function Clean(v)
 	return (tostring(v or ""):gsub('[|"\\\r\n]', ""))
 end
 
-local function Snapshot()
-	local name = UnitName("player")
-	if not name or IsSecret(name) or name == "" then return end
-	local _, classFile = UnitClass("player")
-	local faction = UnitFactionGroup("player")
-	local level = UnitLevel("player")
-	if IsSecret(classFile) or IsSecret(faction) or IsSecret(level) or not classFile or not faction or not level then return end
+-- The last good readings this session. While logging out the game answers some of these
+-- questions with nothing, and that must not wipe out what was read while playing.
+local known = {}
 
-	local equipped
+local function Snapshot()
+	local name = FullName("player")
+	if not name then return end
+
+	local _, classFile = UnitClass("player")
+	if type(classFile) == "string" and not IsSecret(classFile) and classFile ~= "" then
+		known.class = classFile:sub(1, 1):upper() .. classFile:sub(2):lower()
+	end
+	local faction = UnitFactionGroup("player")
+	if type(faction) == "string" and not IsSecret(faction) and faction ~= "" then known.faction = faction:lower() end
+	local level = UnitLevel("player")
+	if type(level) == "number" and not IsSecret(level) and level > 0 then known.level = level end
+
 	if type(GetAverageItemLevel) == "function" then
-		local ok, _, value = pcall(GetAverageItemLevel)
-		if ok and type(value) == "number" and not IsSecret(value) then equipped = value end
+		local ok, _, equipped = pcall(GetAverageItemLevel)
+		if ok and type(equipped) == "number" and not IsSecret(equipped) and equipped > 0 then known.ilvl = equipped end
 	end
 
-	local spec = ""
 	local getSpec = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
 	local getInfo = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo) or GetSpecializationInfo
 	if type(getSpec) == "function" and type(getInfo) == "function" then
 		local ok, index = pcall(getSpec)
 		if ok and type(index) == "number" and not IsSecret(index) then
 			local ok2, _, specName = pcall(getInfo, index)
-			if ok2 and type(specName) == "string" and not IsSecret(specName) then spec = specName end
+			if ok2 and type(specName) == "string" and not IsSecret(specName) and specName ~= "" then known.spec = specName end
 		end
 	end
 
-	local class = classFile:sub(1, 1):upper() .. classFile:sub(2):lower()
+	if not (known.class and known.faction and known.level) then return end
+
+	-- Forever reports the class name as the spec name; that tells nobody anything, so leave it out.
+	local spec = known.spec or ""
+	if spec:lower() == known.class:lower() then spec = "" end
+
 	AntiSocialExport = AntiSocialExport or {}
 	AntiSocialExport[name] = table.concat({
 		"v1",
 		Clean(name),
-		Clean(faction):lower(),
-		Clean(class),
-		tostring(level),
+		Clean(known.faction),
+		Clean(known.class),
+		tostring(known.level),
 		Clean(spec),
-		string.format("%.1f", equipped or 0),
+		string.format("%.1f", known.ilvl or 0),
 		tostring(time()),
 	}, "|")
+
+	-- Versions before 0.4 saved the entry under the first part of the name only.
+	local first = UnitName("player")
+	if first and not IsSecret(first) and first ~= name then AntiSocialExport[first] = nil end
 end
 
 -------------------------------------------------------------------------------

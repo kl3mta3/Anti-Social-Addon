@@ -2,7 +2,7 @@
 ## Title: AntiSocial LFG
 ## Notes: Dungeon finder helper. Paste the group code from the Anti Social companion and it invites your party. Click the minimap button or type /as.
 ## Author: Kenny
-## Version: 0.3.0
+## Version: 0.4.0
 ## IconTexture: Interface\AddOns\AntiSocial\Media\icon
 ## AddonCompartmentFunc: AntiSocial_OnAddonCompartmentClick
 ## SavedVariables: AntiSocialDB, AntiSocialExport
